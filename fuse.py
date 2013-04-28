@@ -46,20 +46,24 @@ try:
 except NameError:
     basestring = str
 
+
 class c_timespec(Structure):
     _fields_ = [('tv_sec', c_long), ('tv_nsec', c_long)]
+
 
 class c_utimbuf(Structure):
     _fields_ = [('actime', c_timespec), ('modtime', c_timespec)]
 
+
 class c_stat(Structure):
     pass    # Platform dependent
+
 
 _system = system()
 _machine = machine()
 
 if _system == 'Darwin':
-    _libiconv = CDLL(find_library('iconv'), RTLD_GLOBAL) # libfuse dependency
+    _libiconv = CDLL(find_library('iconv'), RTLD_GLOBAL)  # libfuse dependency
     _libfuse_path = (find_library('fuse4x') or find_library('osxfuse') or
                      find_library('fuse'))
 else:
@@ -226,6 +230,7 @@ if _system == 'FreeBSD':
             ('f_flag', c_ulong),
             ('f_frsize', c_ulong)]
 
+
 class fuse_file_info(Structure):
     _fields_ = [
         ('flags', c_int),
@@ -238,6 +243,7 @@ class fuse_file_info(Structure):
         ('fh', c_uint64),
         ('lock_owner', c_uint64)]
 
+
 class fuse_context(Structure):
     _fields_ = [
         ('fuse', c_voidp),
@@ -246,6 +252,7 @@ class fuse_context(Structure):
         ('pid', c_pid_t),
         ('private_data', c_voidp)]
 
+
 _libfuse.fuse_get_context.restype = POINTER(fuse_context)
 
 
@@ -253,7 +260,7 @@ class fuse_operations(Structure):
     _fields_ = [
         ('getattr', CFUNCTYPE(c_int, c_char_p, POINTER(c_stat))),
         ('readlink', CFUNCTYPE(c_int, c_char_p, POINTER(c_byte), c_size_t)),
-        ('getdir', c_voidp),    # Deprecated, use readdir
+        ('getdir', c_voidp),  # Deprecated, use readdir
         ('mknod', CFUNCTYPE(c_int, c_char_p, c_mode_t, c_dev_t)),
         ('mkdir', CFUNCTYPE(c_int, c_char_p, c_mode_t)),
         ('unlink', CFUNCTYPE(c_int, c_char_p)),
@@ -264,7 +271,7 @@ class fuse_operations(Structure):
         ('chmod', CFUNCTYPE(c_int, c_char_p, c_mode_t)),
         ('chown', CFUNCTYPE(c_int, c_char_p, c_uid_t, c_gid_t)),
         ('truncate', CFUNCTYPE(c_int, c_char_p, c_off_t)),
-        ('utime', c_voidp),     # Deprecated, use utimens
+        ('utime', c_voidp),  # Deprecated, use utimens
         ('open', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
 
         ('read', CFUNCTYPE(c_int, c_char_p, POINTER(c_byte), c_size_t,
@@ -276,10 +283,12 @@ class fuse_operations(Structure):
         ('statfs', CFUNCTYPE(c_int, c_char_p, POINTER(c_statvfs))),
         ('flush', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
         ('release', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
-        ('fsync', CFUNCTYPE(c_int, c_char_p, c_int, POINTER(fuse_file_info))),
+        ('fsync', CFUNCTYPE(c_int, c_char_p, c_int,
+                            POINTER(fuse_file_info))),
         ('setxattr', setxattr_t),
         ('getxattr', getxattr_t),
-        ('listxattr', CFUNCTYPE(c_int, c_char_p, POINTER(c_byte), c_size_t)),
+        ('listxattr', CFUNCTYPE(c_int, c_char_p,
+                                POINTER(c_byte), c_size_t)),
         ('removexattr', CFUNCTYPE(c_int, c_char_p, c_char_p)),
         ('opendir', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
 
@@ -316,6 +325,7 @@ class fuse_operations(Structure):
 
 def time_of_timespec(ts):
     return ts.tv_sec + ts.tv_nsec / 10 ** 9
+
 
 def set_st_attrs(st, attrs):
     for key, val in attrs.items():
@@ -363,7 +373,9 @@ class FUSE(object):
         if kwargs.pop('nothreads', False):
             args.append('-s')
         if kwargs.pop('readonly', False):
-	    args.append('-r')
+            args.append('-r')
+        if kwargs.pop('allow_other', False):
+            args.append('-oallow_other')
         kwargs.setdefault('fsname', operations.__class__.__name__)
         args.append('-o')
         args.append(','.join(self._normalize_fuse_options(**kwargs)))
@@ -393,7 +405,8 @@ class FUSE(object):
     def _normalize_fuse_options(**kargs):
         for key, value in kargs.items():
             if isinstance(value, bool):
-                if value is True: yield key
+                if value is True:
+                    yield key
             else:
                 yield '%s=%s' % (key, value)
 
@@ -404,7 +417,8 @@ class FUSE(object):
             return func(*args, **kwargs) or 0
         except OSError, e:
             return -(e.errno or EFAULT)
-        except:
+        except Exception, e2:
+            logging.error("%s" % str(e2))
             print_exc()
             return -EFAULT
 
@@ -472,21 +486,21 @@ class FUSE(object):
 
     def read(self, path, buf, size, offset, fip):
         if self.raw_fi:
-          fh = fip.contents
+            fh = fip.contents
         else:
-          fh = fip.contents.fh
+            fh = fip.contents.fh
 
-        ret = self.operations('read', path.decode(self.encoding), size,
-                                      offset, fh)
+        data = self.operations('read', path.decode(self.encoding),
+                               size, offset, fh)
 
-        if not ret: return 0
+        if not data:
+            return 0
 
-        retsize = len(ret)
+        retsize = sizeof(data)
         assert retsize <= size, \
             'actual amount read %d greater than expected %d' % (retsize, size)
 
-        data = create_string_buffer(ret, retsize)
-        memmove(buf, ret, retsize)
+        memmove(buf, data, retsize)
         return retsize
 
     def write(self, path, buf, size, offset, fip):
@@ -497,8 +511,10 @@ class FUSE(object):
         else:
             fh = fip.contents.fh
 
-        return self.operations('write', path.decode(self.encoding), data,
-                                        offset, fh)
+        #return self.operations('write', path.decode(self.encoding), data,
+        #                               size, offset, fh)
+        return self.operations('write', path.decode(self.encoding), buf,
+                                       size, offset, fip.contents.fh)
 
     def statfs(self, path, buf):
         stv = buf.contents
@@ -519,9 +535,9 @@ class FUSE(object):
 
     def release(self, path, fip):
         if self.raw_fi:
-          fh = fip.contents
+            fh = fip.contents
         else:
-          fh = fip.contents.fh
+            fh = fip.contents.fh
 
         return self.operations('release', path.decode(self.encoding), fh)
 
@@ -545,10 +561,12 @@ class FUSE(object):
 
         retsize = len(ret)
         # allow size queries
-        if not value: return retsize
+        if not value:
+            return retsize
 
         # do not truncate
-        if retsize > size: return -ERANGE
+        if retsize > size:
+            return -ERANGE
 
         buf = create_string_buffer(ret, retsize)    # Does not add trailing 0
         memmove(value, buf, retsize)
@@ -561,10 +579,12 @@ class FUSE(object):
 
         retsize = len(ret)
         # allow size queries
-        if not namebuf: return retsize
+        if not namebuf:
+            return retsize
 
         # do not truncate
-        if retsize > size: return -ERANGE
+        if retsize > size:
+            return -ERANGE
 
         buf = create_string_buffer(ret, retsize)
         memmove(namebuf, buf, retsize)
@@ -828,7 +848,7 @@ class Operations(object):
         """Times is a (atime, mtime) tuple. If None use current time."""
         return 0
 
-    def write(self, path, data, offset, fh):
+    def write(self, path, data, size, offset, fh):
         raise FuseOSError(EROFS)
 
 
